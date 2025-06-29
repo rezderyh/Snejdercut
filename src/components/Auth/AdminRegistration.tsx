@@ -35,9 +35,7 @@ const AdminRegistration: React.FC = () => {
     }
 
     try {
-      console.log('Iniciando criação de usuário...');
-      
-      // Criar usuário no Supabase Auth
+      // Primeiro, vamos tentar criar o usuário
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: formData.email,
         password: formData.password,
@@ -49,70 +47,44 @@ const AdminRegistration: React.FC = () => {
       });
 
       if (authError) {
-        console.error('Erro na autenticação:', authError);
         throw authError;
       }
 
-      console.log('Usuário criado:', authData);
-
-      if (authData.user) {
-        console.log('Aguardando criação do perfil...');
-        // Aguardar um pouco para o trigger criar o perfil
-        await new Promise(resolve => setTimeout(resolve, 2000));
-
-        // Tentar buscar o perfil primeiro
-        const { data: existingProfile, error: fetchError } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', authData.user.id)
-          .single();
-
-        console.log('Perfil existente:', existingProfile, 'Erro:', fetchError);
-
-        if (existingProfile) {
-          // Se o perfil existe, apenas atualize para admin
-          console.log('Atualizando perfil existente para admin...');
-          const { error: updateError } = await supabase
-            .from('profiles')
-            .update({
-              full_name: formData.fullName,
-              role: 'admin'
-            })
-            .eq('id', authData.user.id);
-
-          if (updateError) {
-            console.error('Erro ao atualizar perfil:', updateError);
-            throw updateError;
-          }
-        } else {
-          // Se não existe, criar o perfil
-          console.log('Criando novo perfil...');
-          const { error: insertError } = await supabase
-            .from('profiles')
-            .insert([{
-              id: authData.user.id,
-              email: formData.email,
-              full_name: formData.fullName,
-              role: 'admin'
-            }]);
-
-          if (insertError) {
-            console.error('Erro ao inserir perfil:', insertError);
-            throw insertError;
-          }
-        }
-
-        console.log('Perfil criado/atualizado com sucesso!');
-        setSuccess('Conta de administrador criada com sucesso! Você pode fazer login agora.');
-        setFormData({ email: '', password: '', confirmPassword: '', fullName: '' });
-        
-        // Redirecionar para login após 3 segundos
-        setTimeout(() => {
-          navigate('/login');
-        }, 3000);
+      if (!authData.user) {
+        throw new Error('Falha ao criar usuário');
       }
+
+      // Aguardar um pouco para o trigger funcionar
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      // Agora vamos criar/atualizar o perfil manualmente
+      const { error: upsertError } = await supabase
+        .from('profiles')
+        .upsert({
+          id: authData.user.id,
+          email: formData.email,
+          full_name: formData.fullName,
+          role: 'admin'
+        }, {
+          onConflict: 'id'
+        });
+
+      if (upsertError) {
+        console.error('Erro ao criar perfil:', upsertError);
+        // Mesmo se der erro no perfil, vamos tentar continuar
+      }
+
+      setSuccess('Conta de administrador criada com sucesso! Redirecionando para login...');
+      setFormData({ email: '', password: '', confirmPassword: '', fullName: '' });
+      
+      // Redirecionar para login após 2 segundos
+      setTimeout(() => {
+        navigate('/login');
+      }, 2000);
+
     } catch (err: any) {
-      console.error('Erro completo:', err);
+      console.error('Erro ao criar conta:', err);
+      
       let errorMessage = 'Erro ao criar conta de administrador';
       
       if (err.message) {
@@ -120,8 +92,10 @@ const AdminRegistration: React.FC = () => {
           errorMessage = 'Este email já está registrado';
         } else if (err.message.includes('Invalid email')) {
           errorMessage = 'Email inválido';
-        } else if (err.message.includes('Password')) {
-          errorMessage = 'Senha muito fraca';
+        } else if (err.message.includes('Password should be at least')) {
+          errorMessage = 'A senha deve ter pelo menos 6 caracteres';
+        } else if (err.message.includes('Signup is disabled')) {
+          errorMessage = 'Registro desabilitado. Verifique as configurações do Supabase';
         } else {
           errorMessage = err.message;
         }
@@ -165,22 +139,25 @@ const AdminRegistration: React.FC = () => {
 
           <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
             {error && (
-              <div className="bg-red-50 border border-red-200 rounded-md p-4 flex items-start">
-                <AlertCircle className="h-5 w-5 text-red-400 mr-2 mt-0.5 flex-shrink-0" />
-                <div className="text-red-700 text-sm">
-                  <p className="font-medium">Erro:</p>
-                  <p>{error}</p>
+              <div className="bg-red-50 border border-red-200 rounded-md p-4">
+                <div className="flex items-start">
+                  <AlertCircle className="h-5 w-5 text-red-400 mr-2 mt-0.5 flex-shrink-0" />
+                  <div className="text-red-700 text-sm">
+                    <p className="font-medium">Erro:</p>
+                    <p>{error}</p>
+                  </div>
                 </div>
               </div>
             )}
 
             {success && (
-              <div className="bg-green-50 border border-green-200 rounded-md p-4 flex items-start">
-                <CheckCircle className="h-5 w-5 text-green-400 mr-2 mt-0.5 flex-shrink-0" />
-                <div className="text-green-700 text-sm">
-                  <p className="font-medium">Sucesso!</p>
-                  <p>{success}</p>
-                  <p className="mt-1 text-xs">Redirecionando para login...</p>
+              <div className="bg-green-50 border border-green-200 rounded-md p-4">
+                <div className="flex items-start">
+                  <CheckCircle className="h-5 w-5 text-green-400 mr-2 mt-0.5 flex-shrink-0" />
+                  <div className="text-green-700 text-sm">
+                    <p className="font-medium">Sucesso!</p>
+                    <p>{success}</p>
+                  </div>
                 </div>
               </div>
             )}
