@@ -35,6 +35,8 @@ const AdminRegistration: React.FC = () => {
     }
 
     try {
+      console.log('Iniciando criação de usuário...');
+      
       // Criar usuário no Supabase Auth
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: formData.email,
@@ -46,23 +48,45 @@ const AdminRegistration: React.FC = () => {
         }
       });
 
-      if (authError) throw authError;
+      if (authError) {
+        console.error('Erro na autenticação:', authError);
+        throw authError;
+      }
+
+      console.log('Usuário criado:', authData);
 
       if (authData.user) {
-        // Wait a moment for any database triggers to complete
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        console.log('Aguardando criação do perfil...');
+        // Aguardar um pouco para o trigger criar o perfil
+        await new Promise(resolve => setTimeout(resolve, 2000));
 
-        // Try to update the profile first (in case it was created by a trigger)
-        const { error: updateError } = await supabase
+        // Tentar buscar o perfil primeiro
+        const { data: existingProfile, error: fetchError } = await supabase
           .from('profiles')
-          .update({
-            full_name: formData.fullName,
-            role: 'admin'
-          })
-          .eq('id', authData.user.id);
+          .select('*')
+          .eq('id', authData.user.id)
+          .single();
 
-        // If update failed, try to insert (profile might not exist)
-        if (updateError) {
+        console.log('Perfil existente:', existingProfile, 'Erro:', fetchError);
+
+        if (existingProfile) {
+          // Se o perfil existe, apenas atualize para admin
+          console.log('Atualizando perfil existente para admin...');
+          const { error: updateError } = await supabase
+            .from('profiles')
+            .update({
+              full_name: formData.fullName,
+              role: 'admin'
+            })
+            .eq('id', authData.user.id);
+
+          if (updateError) {
+            console.error('Erro ao atualizar perfil:', updateError);
+            throw updateError;
+          }
+        } else {
+          // Se não existe, criar o perfil
+          console.log('Criando novo perfil...');
           const { error: insertError } = await supabase
             .from('profiles')
             .insert([{
@@ -72,23 +96,38 @@ const AdminRegistration: React.FC = () => {
               role: 'admin'
             }]);
 
-          // If insert also fails and it's not a duplicate key error, throw it
-          if (insertError && !insertError.message.includes('duplicate key')) {
+          if (insertError) {
+            console.error('Erro ao inserir perfil:', insertError);
             throw insertError;
           }
         }
 
+        console.log('Perfil criado/atualizado com sucesso!');
         setSuccess('Conta de administrador criada com sucesso! Você pode fazer login agora.');
         setFormData({ email: '', password: '', confirmPassword: '', fullName: '' });
         
-        // Redirecionar para login após 2 segundos
+        // Redirecionar para login após 3 segundos
         setTimeout(() => {
           navigate('/login');
-        }, 2000);
+        }, 3000);
       }
     } catch (err: any) {
-      console.error('Erro ao criar conta:', err);
-      setError(err.message || 'Erro ao criar conta de administrador');
+      console.error('Erro completo:', err);
+      let errorMessage = 'Erro ao criar conta de administrador';
+      
+      if (err.message) {
+        if (err.message.includes('User already registered')) {
+          errorMessage = 'Este email já está registrado';
+        } else if (err.message.includes('Invalid email')) {
+          errorMessage = 'Email inválido';
+        } else if (err.message.includes('Password')) {
+          errorMessage = 'Senha muito fraca';
+        } else {
+          errorMessage = err.message;
+        }
+      }
+      
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -126,16 +165,23 @@ const AdminRegistration: React.FC = () => {
 
           <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
             {error && (
-              <div className="bg-red-50 border border-red-200 rounded-md p-4 flex items-center">
-                <AlertCircle className="h-5 w-5 text-red-400 mr-2" />
-                <span className="text-red-700 text-sm">{error}</span>
+              <div className="bg-red-50 border border-red-200 rounded-md p-4 flex items-start">
+                <AlertCircle className="h-5 w-5 text-red-400 mr-2 mt-0.5 flex-shrink-0" />
+                <div className="text-red-700 text-sm">
+                  <p className="font-medium">Erro:</p>
+                  <p>{error}</p>
+                </div>
               </div>
             )}
 
             {success && (
-              <div className="bg-green-50 border border-green-200 rounded-md p-4 flex items-center">
-                <CheckCircle className="h-5 w-5 text-green-400 mr-2" />
-                <span className="text-green-700 text-sm">{success}</span>
+              <div className="bg-green-50 border border-green-200 rounded-md p-4 flex items-start">
+                <CheckCircle className="h-5 w-5 text-green-400 mr-2 mt-0.5 flex-shrink-0" />
+                <div className="text-green-700 text-sm">
+                  <p className="font-medium">Sucesso!</p>
+                  <p>{success}</p>
+                  <p className="mt-1 text-xs">Redirecionando para login...</p>
+                </div>
               </div>
             )}
             
@@ -234,7 +280,14 @@ const AdminRegistration: React.FC = () => {
                 disabled={loading}
                 className="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
-                {loading ? 'Criando conta...' : 'Criar Conta de Administrador'}
+                {loading ? (
+                  <div className="flex items-center">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                    Criando conta...
+                  </div>
+                ) : (
+                  'Criar Conta de Administrador'
+                )}
               </button>
             </div>
 
